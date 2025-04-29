@@ -1,6 +1,14 @@
+# Core Packages
 fastapi==0.95.2
 uvicorn==0.22.0
+
+# Machine Learning
 scikit-learn==1.2.2
-joblib==1.2.0
-pydantic==1.10.7
 numpy==1.24.3
+joblib==1.2.0
+
+# Data Validation
+pydantic==1.10.7
+
+# Development (optional)
+python-dotenv==1.0.0  # For environment variables
