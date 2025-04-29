@@ -5,61 +5,65 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11"]  # Tested compatible versions
+    timeout-minutes: 15
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
-    - name: Set up Python 3.9
-      uses: actions/setup-python@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
+        python-version: ${{ matrix.python-version }}
     
     - name: Cache dependencies
       uses: actions/cache@v3
       with:
         path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        key: ${{ runner.os }}-py${{ matrix.python-version }}-pip-${{ hashFiles('requirements.txt') }}
         restore-keys: |
-          ${{ runner.os }}-pip-
+          ${{ runner.os }}-py${{ matrix.python-version }}-pip-
     
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest  # For additional testing if needed
+        pip install --only-binary=:all: -r requirements.txt
+        pip list  # Verify installed versions
     
-    - name: Verify model loading
+    - name: Verify model compatibility
       run: |
-        python -c "from joblib import load; model = load('model.pkl'); print(f'Model {type(model).__name__} loaded successfully')"
+        python -c "
+        import sklearn, numpy, joblib;
+        print(f'scikit-learn: {sklearn.__version__}\\nnumpy: {numpy.__version__}\\njoblib: {joblib.__version__}');
+        from joblib import load; 
+        model = load('model.pkl');
+        print(f'Model {type(model).__name__} loaded successfully')
+        "
     
     - name: Run API tests
       run: |
-        # Start server in background
-        uvicorn app:app --host 0.0.0.0 --port 8000 > server.log 2>&1 &
+        # Start server with timeout
+        timeout 5m uvicorn app:app --host 0.0.0.0 --port 8000 > server.log 2>&1 &
         SERVER_PID=$!
-        
-        # Wait for server to start
-        sleep 5
+        sleep 10  # Wait for server startup
         
         # Test prediction endpoint
         RESPONSE=$(curl -s -X POST "http://localhost:8000/predict" \
           -H "Content-Type: application/json" \
           -d '{"sepal_length":5.1,"sepal_width":3.5,"petal_length":1.4,"petal_width":0.2}')
-        
         echo "API Response: $RESPONSE"
         
-        # Validate response
+        # Validate response format
         python -c "
         import json, sys;
         response = json.loads('$RESPONSE')
-        assert 'prediction' in response, 'Missing prediction key'
+        assert 'prediction' in response, 'Missing prediction field'
         assert isinstance(response['prediction'], int), 'Prediction should be integer'
-        print('Response validation passed')
+        print('✅ Response validation passed')
         "
         
-        # Kill server
+        # Cleanup
         kill $SERVER_PID
-        
-        # Check server logs for errors
-        cat server.log
+        cat server.log  # Output server logs
